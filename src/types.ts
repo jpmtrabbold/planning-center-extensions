@@ -1,6 +1,9 @@
 export interface ApiResponse<T> {
   data: T;
   included?: unknown[];
+  meta?: {
+    total_count?: number;
+  };
   links?: {
     next?: string | null;
   };

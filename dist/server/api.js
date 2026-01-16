@@ -1,6 +1,16 @@
 const API_BASE = 'https://api.planningcenteronline.com/services/v2';
 const buildAuthHeader = (credentials) => {
-    const encoded = btoa(`${credentials.appId}:${credentials.appSecret}`);
+    const encoded = (() => {
+        if (typeof btoa === 'function') {
+            return btoa(`${credentials.appId}:${credentials.appSecret}`);
+        }
+        const BufferRef = globalThis
+            .Buffer;
+        if (!BufferRef) {
+            throw new Error('Base64 encoder is not available in this environment.');
+        }
+        return BufferRef.from(`${credentials.appId}:${credentials.appSecret}`, 'utf-8').toString('base64');
+    })();
     return `Basic ${encoded}`;
 };
 const fetchJson = async (url, credentials, options) => {
