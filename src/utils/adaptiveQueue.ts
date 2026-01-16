@@ -14,6 +14,7 @@ type AdaptiveQueueOptions = {
   maxRetries?: number;
   taskTimeoutMs?: number;
   onAdjust?: (state: { concurrency: number; delayMs: number; reason: string }) => void;
+  onTaskStart?: (taskId: string) => void;
   onTaskComplete?: (taskId: string) => void;
 };
 
@@ -37,6 +38,7 @@ export const runAdaptiveQueue = async <T>(
     maxRetries = 3,
     taskTimeoutMs = 30000,
     onAdjust,
+    onTaskStart,
     onTaskComplete,
   } = options;
 
@@ -60,6 +62,7 @@ export const runAdaptiveQueue = async <T>(
             await sleep(delayMs);
           }
           try {
+            onTaskStart?.(entry.task.id);
             const value = (await Promise.race([
               entry.task.run(),
               new Promise<T>((_, reject) =>

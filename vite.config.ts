@@ -6,6 +6,10 @@ export default defineConfig({
   server: {
     proxy: {
       '/trpc': 'http://localhost:5174',
+      '/ws': {
+        target: 'http://localhost:5174',
+        ws: true,
+      },
     },
   },
   build: {

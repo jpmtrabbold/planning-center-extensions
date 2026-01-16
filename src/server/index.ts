@@ -1,5 +1,8 @@
+import { createServer } from 'node:http';
+
 import { createApp } from './app.js';
 import { addStaticClient } from './static.js';
+import { attachWebSocketServer } from './ws.js';
 
 const port = Number.parseInt(process.env.PORT ?? '', 10) || 5174;
 const rootDir = process.cwd();
@@ -11,6 +14,9 @@ if (typeof globalThis.fetch !== 'function') {
 const app = createApp();
 addStaticClient(app, rootDir);
 
-app.listen(port, () => {
+const server = createServer(app);
+attachWebSocketServer(server);
+
+server.listen(port, () => {
   console.log(`Server running at http://localhost:${port}`);
 });

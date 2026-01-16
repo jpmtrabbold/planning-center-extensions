@@ -28,6 +28,38 @@ export interface Plan {
   };
 }
 
+export interface ServiceType {
+  id: string;
+  type: 'ServiceType';
+  attributes: {
+    name: string;
+  };
+}
+
+export interface Arrangement {
+  id: string;
+  type: 'Arrangement';
+  attributes?: {
+    name?: string | null;
+    is_default?: boolean;
+    default?: boolean;
+    isDefault?: boolean;
+    is_default_arrangement?: boolean;
+  };
+}
+
+export interface ArrangementKey {
+  id: string;
+  type: 'Key';
+  attributes?: {
+    name?: string | null;
+    is_default?: boolean;
+    default?: boolean;
+    isDefault?: boolean;
+    is_default_key?: boolean;
+  };
+}
+
 export interface PlanItem {
   id: string;
   type: 'Item';
@@ -51,3 +83,19 @@ export interface MatchResult {
   song: Song;
   score: number;
 }
+
+export type ProgressEvent =
+  | {
+      type: 'scan' | 'link';
+      scanId?: string;
+      step: number;
+      stepLabel: string;
+      stepPercent: number;
+      overallPercent: number;
+    }
+  | {
+      type: 'link-item';
+      scanId?: string;
+      itemId: string;
+      status: 'queued' | 'in_progress' | 'done' | 'error';
+    };

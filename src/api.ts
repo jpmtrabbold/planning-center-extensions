@@ -1,4 +1,16 @@
-import type { ApiResponse, MatchResult, Plan, PlanItem, PlanItemWithPlan, Song } from './types.js';
+import type {
+  ApiResponse,
+  Arrangement,
+  ArrangementKey,
+  MatchResult,
+  Plan,
+  PlanItem,
+  PlanItemWithPlan,
+  ProgressEvent,
+  ServiceType,
+  Song,
+} from './types.js';
+import { emitProgress } from './server/progress.js';
 import { runAdaptiveQueue } from './utils/adaptiveQueue.js';
 import { buildMatchResults } from './utils/match.js';
 
@@ -149,6 +161,33 @@ export const listSongs = async (
   return songs;
 };
 
+export const listServiceTypes = async (
+  credentials: Credentials,
+  options: ListOptions = {}
+): Promise<ServiceType[]> => {
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[pco] listServiceTypes: start');
+  }
+  const types: ServiceType[] = [];
+  let nextUrl: string | null = `${API_BASE}/service_types?per_page=100`;
+  let totalCount: number | undefined;
+
+  while (nextUrl) {
+    const response: ApiResponse<ServiceType[]> = await fetchJson<ServiceType[]>(nextUrl, credentials);
+    types.push(...response.data);
+    if (totalCount === undefined && typeof response.meta?.total_count === 'number') {
+      totalCount = response.meta.total_count;
+    }
+    nextUrl = response.links?.next ?? null;
+    options.onProgress?.({ loaded: types.length, total: totalCount, done: !nextUrl });
+  }
+
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`[pco] listServiceTypes: done (${types.length})`);
+  }
+  return types;
+};
+
 export const listPlans = async (
   credentials: Credentials,
   serviceTypeId: string,
@@ -183,6 +222,48 @@ export const listPlans = async (
     console.log(`[pco] listPlans: done (${plans.length})`);
   }
   return plans.slice(0, requested);
+};
+
+const listSongArrangements = async (
+  credentials: Credentials,
+  songId: string
+): Promise<Arrangement[]> => {
+  const arrangements: Arrangement[] = [];
+  let nextUrl: string | null = `${API_BASE}/songs/${songId}/arrangements?per_page=100`;
+
+  while (nextUrl) {
+    const response: ApiResponse<Arrangement[]> = await fetchJson<Arrangement[]>(nextUrl, credentials);
+    arrangements.push(...response.data);
+    nextUrl = response.links?.next ?? null;
+  }
+
+  return arrangements;
+};
+
+const isDefaultArrangement = (arrangement: Arrangement) => {
+  const attrs = arrangement.attributes ?? {};
+  return Boolean(
+    attrs.is_default ||
+      attrs.default ||
+      attrs.isDefault ||
+      attrs.is_default_arrangement
+  );
+};
+
+const getDefaultArrangementId = async (
+  credentials: Credentials,
+  songId: string,
+  cache: Map<string, string | null>
+) => {
+  if (cache.has(songId)) {
+    return cache.get(songId) ?? null;
+  }
+  const arrangements = await listSongArrangements(credentials, songId);
+  const defaultArrangement =
+    arrangements.find((arrangement) => isDefaultArrangement(arrangement)) ?? arrangements[0] ?? null;
+  const id = defaultArrangement?.id ?? null;
+  cache.set(songId, id);
+  return id;
 };
 
 export const listPlanItems = async (
@@ -264,26 +345,37 @@ export const scanMatches = async (
   credentials: Credentials,
   serviceTypeId: string,
   pageSize: number,
-  scoreThreshold: number
+  scoreThreshold: number,
+  scanId?: string
 ): Promise<MatchResult[]> => {
   const clampPercent = (value: number) => Math.min(100, Math.max(0, Math.round(value)));
   const stepPercents = [0, 0, 0, 0];
   const lastLogged = { step: [-1, -1, -1, -1], overall: -1 };
 
   const logProgress = (stepIndex: number, label: string, percent: number, force = false) => {
-    if (process.env.NODE_ENV === 'production') {
-      return;
-    }
     const stepPercent = clampPercent(percent);
     stepPercents[stepIndex] = stepPercent;
     const overall = clampPercent(stepPercents.reduce((sum, value) => sum + value, 0) / 4);
     const stepChanged = Math.abs(stepPercent - lastLogged.step[stepIndex]) >= 5;
     const overallChanged = Math.abs(overall - lastLogged.overall) >= 5;
-    if (force || stepChanged || overallChanged) {
-      console.log(`[scan] Step ${stepIndex + 1}/4: ${label} (${stepPercent}% | overall ${overall}%)`);
-      lastLogged.step[stepIndex] = stepPercent;
-      lastLogged.overall = overall;
+    const shouldEmit = force || stepChanged || overallChanged;
+    if (!shouldEmit) {
+      return;
     }
+    const payload: ProgressEvent = {
+      type: 'scan',
+      scanId,
+      step: stepIndex + 1,
+      stepLabel: label,
+      stepPercent,
+      overallPercent: overall,
+    };
+    emitProgress(payload);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[scan] Step ${stepIndex + 1}/4: ${label} (${stepPercent}% | overall ${overall}%)`);
+    }
+    lastLogged.step[stepIndex] = stepPercent;
+    lastLogged.overall = overall;
   };
 
   const percentFromList = (progress: ListProgress) => {
@@ -369,12 +461,131 @@ export const scanMatches = async (
   return results;
 };
 
+type LinkSelection = {
+  planId: string;
+  itemId: string;
+  songId: string;
+  selectionKey: string;
+};
+
+export const linkMatches = async (
+  credentials: Credentials,
+  serviceTypeId: string,
+  selections: LinkSelection[],
+  scanId?: string
+): Promise<void> => {
+  const clampPercent = (value: number) => Math.min(100, Math.max(0, Math.round(value)));
+  const stepPercents = [0, 0];
+  const lastLogged = { step: [-1, -1], overall: -1 };
+
+  const logProgress = (stepIndex: number, label: string, percent: number, force = false) => {
+    const stepPercent = clampPercent(percent);
+    stepPercents[stepIndex] = stepPercent;
+    const overall = clampPercent(stepPercents.reduce((sum, value) => sum + value, 0) / 2);
+    const stepChanged = Math.abs(stepPercent - lastLogged.step[stepIndex]) >= 5;
+    const overallChanged = Math.abs(overall - lastLogged.overall) >= 5;
+    const shouldEmit = force || stepChanged || overallChanged;
+    if (!shouldEmit) {
+      return;
+    }
+    const payload: ProgressEvent = {
+      type: 'link',
+      scanId,
+      step: stepIndex + 1,
+      stepLabel: label,
+      stepPercent,
+      overallPercent: overall,
+    };
+    emitProgress(payload);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[link] Step ${stepIndex + 1}/2: ${label} (${stepPercent}% | overall ${overall}%)`);
+    }
+    lastLogged.step[stepIndex] = stepPercent;
+    lastLogged.overall = overall;
+  };
+
+  if (process.env.NODE_ENV !== 'production') {
+    logProgress(0, 'validating inputs', 0, true);
+  }
+
+  const trimmedServiceType = serviceTypeId.trim();
+  if (!trimmedServiceType) {
+    throw new Error('Please provide a service type ID.');
+  }
+  if (selections.length === 0) {
+    throw new Error('Please select at least one match to link.');
+  }
+
+  if (process.env.NODE_ENV !== 'production') {
+    logProgress(0, 'validating inputs', 100, true);
+    logProgress(1, `linking ${selections.length} items`, 0, true);
+  }
+
+  for (const selection of selections) {
+    emitProgress({
+      type: 'link-item',
+      scanId,
+      itemId: selection.selectionKey,
+      status: 'queued',
+    });
+  }
+
+  let completed = 0;
+  const arrangementCache = new Map<string, string | null>();
+  await runAdaptiveQueue(
+    selections.map((selection) => ({
+      id: selection.selectionKey,
+      run: async () => {
+        const arrangementId = await getDefaultArrangementId(
+          credentials,
+          selection.songId,
+          arrangementCache
+        );
+        await updatePlanItemSong(
+          credentials,
+          trimmedServiceType,
+          selection.planId,
+          selection.itemId,
+          selection.songId,
+          arrangementId ?? undefined
+        );
+      },
+    })),
+    {
+      onTaskStart: (taskId) => {
+        emitProgress({
+          type: 'link-item',
+          scanId,
+          itemId: taskId,
+          status: 'in_progress',
+        });
+      },
+      onTaskComplete: (taskId) => {
+        completed += 1;
+        emitProgress({
+          type: 'link-item',
+          scanId,
+          itemId: taskId,
+          status: 'done',
+        });
+        const percent = selections.length > 0 ? (completed / selections.length) * 100 : 100;
+        logProgress(1, `linking ${selections.length} items`, percent);
+      },
+    }
+  );
+
+  if (process.env.NODE_ENV !== 'production') {
+    logProgress(1, `linking ${selections.length} items`, 100, true);
+  }
+};
+
 export const updatePlanItemSong = async (
   credentials: Credentials,
   serviceTypeId: string,
   planId: string,
   itemId: string,
-  songId: string
+  songId: string,
+  arrangementId?: string | null
 ): Promise<void> => {
   const url = `${API_BASE}/service_types/${serviceTypeId}/plans/${planId}/items/${itemId}`;
   await fetchJson(url, credentials, {
@@ -390,6 +601,16 @@ export const updatePlanItemSong = async (
               id: songId,
             },
           },
+          ...(arrangementId
+            ? {
+                arrangement: {
+                  data: {
+                    type: 'Arrangement',
+                    id: arrangementId,
+                  },
+                },
+              }
+            : {}),
         },
       },
     }),

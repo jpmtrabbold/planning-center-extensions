@@ -3,6 +3,8 @@ type ScanOptionsCardProps = {
   pageSize: string;
   scoreThreshold: string;
   isScanning: boolean;
+  serviceTypes: { id: string; name: string }[];
+  serviceTypesState: 'idle' | 'loading' | 'ready' | 'error';
   onServiceTypeChange: (value: string) => void;
   onPageSizeChange: (value: string) => void;
   onScoreThresholdChange: (value: string) => void;
@@ -15,6 +17,8 @@ export const ScanOptionsCard = ({
   pageSize,
   scoreThreshold,
   isScanning,
+  serviceTypes,
+  serviceTypesState,
   onServiceTypeChange,
   onPageSizeChange,
   onScoreThresholdChange,
@@ -25,14 +29,29 @@ export const ScanOptionsCard = ({
     <h2>2) Scan Options</h2>
     <div className="grid">
       <div>
-        <label htmlFor="service-type-id">Service Type ID</label>
+        <label htmlFor="service-type-id">Service Type</label>
         <input
           id="service-type-id"
           type="text"
-          placeholder="e.g. 123456"
+          list="service-type-options"
+          placeholder="e.g. Sunday Worship (123456)"
           value={serviceTypeId}
           onChange={(event) => onServiceTypeChange(event.target.value)}
         />
+        <datalist id="service-type-options">
+          {serviceTypes.map((serviceType) => (
+            <option
+              key={serviceType.id}
+              value={`${serviceType.name} (${serviceType.id})`}
+              label={`${serviceType.name} (${serviceType.id})`}
+            />
+          ))}
+        </datalist>
+        {serviceTypesState === 'loading' ? (
+          <p className="helper">Loading service types...</p>
+        ) : serviceTypesState === 'error' ? (
+          <p className="helper error">Unable to load service types. Enter an ID manually.</p>
+        ) : null}
       </div>
       <div>
         <label htmlFor="page-size">Plans to scan</label>
@@ -40,7 +59,6 @@ export const ScanOptionsCard = ({
           id="page-size"
           type="number"
           min="1"
-          max="500"
           value={pageSize}
           onChange={(event) => onPageSizeChange(event.target.value)}
         />
