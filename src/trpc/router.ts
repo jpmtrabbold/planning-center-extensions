@@ -51,6 +51,7 @@ export const appRouter = t.router({
         serviceTypeId: z.string().min(1),
         pageSize: z.number().int().min(1),
         scoreThreshold: z.number().min(0).max(1),
+        scoreDelta: z.number().min(0).max(1),
         scanId: z.string().min(1).optional(),
       })
     )
@@ -60,6 +61,7 @@ export const appRouter = t.router({
         input.serviceTypeId,
         input.pageSize,
         input.scoreThreshold,
+        input.scoreDelta,
         input.scanId
       )
     ),

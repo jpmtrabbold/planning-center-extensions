@@ -250,6 +250,31 @@ const isDefaultArrangement = (arrangement: Arrangement) => {
   );
 };
 
+const listArrangementKeys = async (
+  credentials: Credentials,
+  songId: string,
+  arrangementId: string
+): Promise<ArrangementKey[]> => {
+  const keys: ArrangementKey[] = [];
+  let nextUrl: string | null = `${API_BASE}/songs/${songId}/arrangements/${arrangementId}/keys?per_page=100`;
+
+  while (nextUrl) {
+    const response: ApiResponse<ArrangementKey[]> = await fetchJson<ArrangementKey[]>(
+      nextUrl,
+      credentials
+    );
+    keys.push(...response.data);
+    nextUrl = response.links?.next ?? null;
+  }
+
+  return keys;
+};
+
+const isDefaultArrangementKey = (key: ArrangementKey) => {
+  const attrs = key.attributes ?? {};
+  return Boolean(attrs.is_default || attrs.default || attrs.isDefault || attrs.is_default_key);
+};
+
 const getDefaultArrangementId = async (
   credentials: Credentials,
   songId: string,
@@ -263,6 +288,23 @@ const getDefaultArrangementId = async (
     arrangements.find((arrangement) => isDefaultArrangement(arrangement)) ?? arrangements[0] ?? null;
   const id = defaultArrangement?.id ?? null;
   cache.set(songId, id);
+  return id;
+};
+
+const getDefaultArrangementKeyId = async (
+  credentials: Credentials,
+  songId: string,
+  arrangementId: string,
+  cache: Map<string, string | null>
+) => {
+  const cacheKey = `${songId}:${arrangementId}`;
+  if (cache.has(cacheKey)) {
+    return cache.get(cacheKey) ?? null;
+  }
+  const keys = await listArrangementKeys(credentials, songId, arrangementId);
+  const defaultKey = keys.find((key) => isDefaultArrangementKey(key)) ?? keys[0] ?? null;
+  const id = defaultKey?.id ?? null;
+  cache.set(cacheKey, id);
   return id;
 };
 
@@ -346,6 +388,7 @@ export const scanMatches = async (
   serviceTypeId: string,
   pageSize: number,
   scoreThreshold: number,
+  scoreDelta: number,
   scanId?: string
 ): Promise<MatchResult[]> => {
   const clampPercent = (value: number) => Math.min(100, Math.max(0, Math.round(value)));
@@ -396,6 +439,7 @@ export const scanMatches = async (
 
   const requested = Math.max(1, pageSize);
   const threshold = Number.isFinite(scoreThreshold) ? scoreThreshold : 0.7;
+  const delta = Number.isFinite(scoreDelta) ? Math.max(0, scoreDelta) : 0.05;
 
   if (process.env.NODE_ENV !== 'production') {
     logProgress(0, 'validating inputs', 100, true);
@@ -447,7 +491,7 @@ export const scanMatches = async (
   if (process.env.NODE_ENV !== 'production') {
     logProgress(3, `matching ${unlinkedItems.length} items`, 0, true);
   }
-  const results = buildMatchResults(unlinkedItems, songs, threshold, {
+  const results = buildMatchResults(unlinkedItems, songs, threshold, delta, {
     onProgress: ({ processed, total }) => {
       if (process.env.NODE_ENV !== 'production') {
         const percent = total > 0 ? (processed / total) * 100 : 100;
@@ -532,6 +576,7 @@ export const linkMatches = async (
 
   let completed = 0;
   const arrangementCache = new Map<string, string | null>();
+  const keyCache = new Map<string, string | null>();
   await runAdaptiveQueue(
     selections.map((selection) => ({
       id: selection.selectionKey,
@@ -541,13 +586,22 @@ export const linkMatches = async (
           selection.songId,
           arrangementCache
         );
+        const keyId = arrangementId
+          ? await getDefaultArrangementKeyId(
+              credentials,
+              selection.songId,
+              arrangementId,
+              keyCache
+            )
+          : null;
         await updatePlanItemSong(
           credentials,
           trimmedServiceType,
           selection.planId,
           selection.itemId,
           selection.songId,
-          arrangementId ?? undefined
+          arrangementId ?? undefined,
+          keyId ?? undefined
         );
       },
     })),
@@ -585,7 +639,8 @@ export const updatePlanItemSong = async (
   planId: string,
   itemId: string,
   songId: string,
-  arrangementId?: string | null
+  arrangementId?: string | null,
+  keyId?: string | null
 ): Promise<void> => {
   const url = `${API_BASE}/service_types/${serviceTypeId}/plans/${planId}/items/${itemId}`;
   await fetchJson(url, credentials, {
@@ -607,6 +662,16 @@ export const updatePlanItemSong = async (
                   data: {
                     type: 'Arrangement',
                     id: arrangementId,
+                  },
+                },
+              }
+            : {}),
+          ...(keyId
+            ? {
+                key: {
+                  data: {
+                    type: 'Key',
+                    id: keyId,
                   },
                 },
               }

@@ -2,6 +2,9 @@ type ApiCredentialsCardProps = {
   appId: string;
   appSecret: string;
   rememberCredentials: boolean;
+  isLocked: boolean;
+  onSave: () => void;
+  onEdit: () => void;
   onAppIdChange: (value: string) => void;
   onAppSecretChange: (value: string) => void;
   onRememberChange: (value: boolean) => void;
@@ -11,6 +14,9 @@ export const ApiCredentialsCard = ({
   appId,
   appSecret,
   rememberCredentials,
+  isLocked,
+  onSave,
+  onEdit,
   onAppIdChange,
   onAppSecretChange,
   onRememberChange,
@@ -26,6 +32,7 @@ export const ApiCredentialsCard = ({
           placeholder="App ID"
           value={appId}
           onChange={(event) => onAppIdChange(event.target.value)}
+          disabled={isLocked}
         />
       </div>
       <div>
@@ -36,6 +43,7 @@ export const ApiCredentialsCard = ({
           placeholder="Secret"
           value={appSecret}
           onChange={(event) => onAppSecretChange(event.target.value)}
+          disabled={isLocked}
         />
       </div>
     </div>
@@ -46,9 +54,19 @@ export const ApiCredentialsCard = ({
           type="checkbox"
           checked={rememberCredentials}
           onChange={(event) => onRememberChange(event.target.checked)}
+          disabled={isLocked}
         />
         Remember credentials on this device
       </label>
+    </div>
+    <div className="actions" style={{ marginTop: '12px' }}>
+      {isLocked ? (
+        <button className="secondary" onClick={onEdit}>
+          Edit credentials
+        </button>
+      ) : (
+        <button onClick={onSave}>Save credentials</button>
+      )}
     </div>
     <p className="muted">
       These are used only in your browser session to call the Planning Center API. Use a separate

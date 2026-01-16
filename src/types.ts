@@ -78,10 +78,15 @@ export interface PlanItemWithPlan extends PlanItem {
   plan: Plan;
 }
 
-export interface MatchResult {
-  item: PlanItemWithPlan;
+export interface SuggestedSong {
   song: Song;
   score: number;
+}
+
+export interface MatchResult {
+  item: PlanItemWithPlan;
+  matches: SuggestedSong[];
+  bestScore: number;
 }
 
 export type ProgressEvent =

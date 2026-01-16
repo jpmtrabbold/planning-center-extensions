@@ -149,6 +149,11 @@ td {
   flex-wrap: wrap;
   margin-bottom: 12px;
 }
+.bulk-actions-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .checkbox {
   display: flex;
   align-items: center;
@@ -165,6 +170,8 @@ td {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.01em;
+  min-width: 120px;
+  justify-content: space-between;
 }
 .row-status::before {
   content: '';
@@ -196,6 +203,31 @@ td {
 .row-status.error {
   color: #f9b1b1;
   background: rgba(245, 101, 101, 0.2);
+}
+.lock-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  background: rgba(15, 17, 21, 0.35);
+}
+.status-cell {
+  width: 160px;
+}
+.song-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.song-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #d7dbe6;
 }
 .footer-note {
   font-size: 12px;

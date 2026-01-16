@@ -4,6 +4,7 @@ type CachedForm = {
   serviceTypeId?: string;
   pageSize?: string;
   scoreThreshold?: string;
+  scoreDelta?: string;
   rememberCredentials?: boolean;
 };
 

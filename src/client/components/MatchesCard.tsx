@@ -7,9 +7,12 @@ type MatchesCardProps = {
   progress?: ProgressEvent | null;
   selectedMatchIds: Set<string>;
   linkItemStatus: Record<string, 'idle' | 'selected' | 'queued' | 'in_progress' | 'done' | 'error'>;
+  selectedSongByItem: Record<string, string>;
   isLinking: boolean;
   onToggleAll: (checked: boolean) => void;
   onToggleMatch: (matchId: string, checked: boolean) => void;
+  onSelectMatchSong: (matchId: string, songId: string) => void;
+  onSelectTopScore: () => void;
   onLinkSelected: () => void;
 };
 
@@ -19,9 +22,12 @@ export const MatchesCard = ({
   progress,
   selectedMatchIds,
   linkItemStatus,
+  selectedSongByItem,
   isLinking,
   onToggleAll,
   onToggleMatch,
+  onSelectMatchSong,
+  onSelectTopScore,
   onLinkSelected,
 }: MatchesCardProps) => {
   const totalMatches = matches.length;
@@ -65,9 +71,14 @@ export const MatchesCard = ({
           />
           {`Select all (${selectedCount}/${totalMatches})`}
         </label>
-        <button onClick={onLinkSelected} disabled={isLinking || selectedCount === 0}>
-          {isLinking ? 'Linking...' : `Link selected (${selectedCount})`}
-        </button>
+        <div className="bulk-actions-buttons">
+          <button onClick={onSelectTopScore} disabled={isLinking || selectableMatches.length === 0}>
+            Select top score
+          </button>
+          <button onClick={onLinkSelected} disabled={isLinking || selectedCount === 0}>
+            {isLinking ? 'Linking...' : `Link selected (${selectedCount})`}
+          </button>
+        </div>
       </div>
     ) : null}
     <div style={{ overflowX: 'auto' }}>
@@ -79,7 +90,7 @@ export const MatchesCard = ({
             <th>Plan</th>
             <th>Item Title</th>
             <th>Suggested Song</th>
-            <th>Score</th>
+            <th>Best Score</th>
           </tr>
         </thead>
         <tbody>
@@ -90,6 +101,7 @@ export const MatchesCard = ({
             const isBusy = statusValue === 'in_progress';
             const isQueued = statusValue === 'queued';
             const isDisabled = isLinking || isDone || isBusy || isQueued;
+            const selectedSongId = selectedSongByItem[key] ?? match.matches[0]?.song.id ?? '';
             const statusLabel =
               statusValue === 'done'
                 ? 'Linked'
@@ -114,8 +126,11 @@ export const MatchesCard = ({
                   disabled={isDisabled}
                 />
               </td>
-              <td>
-                <span className={`row-status ${statusValue}`}>{statusLabel}</span>
+              <td className="status-cell">
+                <span className={`row-status ${statusValue}`}>
+                  {statusLabel}
+                  {statusValue === 'done' ? <span className="lock-icon">LOCK</span> : null}
+                </span>
               </td>
               <td>
                 <a
@@ -127,8 +142,33 @@ export const MatchesCard = ({
                 </a>
               </td>
               <td>{match.item.attributes.title}</td>
-              <td>{match.song.attributes.title}</td>
-              <td>{match.score.toFixed(2)}</td>
+              <td>
+                <div className="song-options">
+                  {match.matches.map((option) => (
+                    <label key={option.song.id} className="song-option">
+                      <input
+                        type="radio"
+                        name={`song-option-${key}`}
+                        value={option.song.id}
+                        checked={selectedSongId === option.song.id}
+                        onChange={() => onSelectMatchSong(key, option.song.id)}
+                        disabled={isDisabled}
+                      />
+                      <span>
+                        <a
+                          href={`https://services.planningcenteronline.com/songs/${option.song.id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {option.song.attributes.title}
+                        </a>
+                        {` (${option.score.toFixed(2)})`}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </td>
+              <td>{match.bestScore.toFixed(2)}</td>
             </tr>
             );
           })}

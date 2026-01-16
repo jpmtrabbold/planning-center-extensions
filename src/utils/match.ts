@@ -1,5 +1,5 @@
 import { similarityScore } from '../fuzzy.js';
-import type { MatchResult, PlanItemWithPlan, Song } from '../types.js';
+import type { MatchResult, PlanItemWithPlan, Song, SuggestedSong } from '../types.js';
 
 type MatchProgress = {
   processed: number;
@@ -15,6 +15,7 @@ export const buildMatchResults = (
   items: PlanItemWithPlan[],
   songs: Song[],
   threshold: number,
+  delta: number,
   options: MatchOptions = {}
 ): MatchResult[] => {
   const results: MatchResult[] = [];
@@ -30,20 +31,28 @@ export const buildMatchResults = (
       continue;
     }
     let bestScore = 0;
-    let bestSong: Song | null = null;
+    const candidates: SuggestedSong[] = [];
     for (const song of songs) {
       const score = similarityScore(item.attributes.title, song.attributes.title);
+      if (score >= threshold) {
+        candidates.push({ song, score });
+      }
       if (score > bestScore) {
         bestScore = score;
-        bestSong = song;
       }
     }
-    if (bestSong && bestScore >= threshold) {
-      results.push({ item, song: bestSong, score: bestScore });
+    if (bestScore >= threshold) {
+      const cutoff = Math.max(threshold, bestScore - delta);
+      const matches = candidates
+        .filter((candidate) => candidate.score >= cutoff)
+        .sort((a, b) => b.score - a.score);
+      if (matches.length > 0) {
+        results.push({ item, matches, bestScore });
+      }
     }
     if (options.onProgress && (processed % progressEvery === 0 || processed === total)) {
       options.onProgress({ processed, total });
     }
   }
-  return results.sort((a, b) => b.score - a.score);
+  return results.sort((a, b) => b.bestScore - a.bestScore);
 };

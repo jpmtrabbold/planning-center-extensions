@@ -24,7 +24,9 @@ export const App = () => {
   const [serviceTypeId, setServiceTypeId] = useState('');
   const [pageSize, setPageSize] = useState('10');
   const [scoreThreshold, setScoreThreshold] = useState('0.7');
+  const [scoreDelta, setScoreDelta] = useState('0.05');
   const [rememberCredentials, setRememberCredentials] = useState(false);
+  const [credentialsLocked, setCredentialsLocked] = useState(false);
 
   const [matches, setMatches] = useState<MatchResult[]>([]);
   const [status, setStatus] = useState<{ state: StatusState; message: string }>({
@@ -41,6 +43,7 @@ export const App = () => {
   const [linkItemStatus, setLinkItemStatus] = useState<
     Record<string, 'idle' | 'selected' | 'queued' | 'in_progress' | 'done' | 'error'>
   >({});
+  const [selectedSongByItem, setSelectedSongByItem] = useState<Record<string, string>>({});
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
   const [serviceTypesState, setServiceTypesState] = useState<'idle' | 'loading' | 'ready' | 'error'>(
     'idle'
@@ -84,6 +87,9 @@ export const App = () => {
     if (cached.scoreThreshold) {
       setScoreThreshold(cached.scoreThreshold);
     }
+    if (cached.scoreDelta) {
+      setScoreDelta(cached.scoreDelta);
+    }
     if (cached.rememberCredentials) {
       setRememberCredentials(true);
       if (cached.appId) {
@@ -93,6 +99,9 @@ export const App = () => {
         setAppSecret(cached.appSecret);
       }
     }
+    if (cached.appId && cached.appSecret) {
+      setCredentialsLocked(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -100,15 +109,16 @@ export const App = () => {
       serviceTypeId,
       pageSize,
       scoreThreshold,
+      scoreDelta,
       rememberCredentials,
-      ...(rememberCredentials ? { appId, appSecret } : {}),
+      ...(rememberCredentials && credentialsLocked ? { appId, appSecret } : {}),
     });
-  }, [appId, appSecret, serviceTypeId, pageSize, scoreThreshold, rememberCredentials]);
+  }, [appId, appSecret, serviceTypeId, pageSize, scoreThreshold, scoreDelta, rememberCredentials, credentialsLocked]);
 
   useEffect(() => {
     const trimmedId = appId.trim();
     const trimmedSecret = appSecret.trim();
-    if (!trimmedId || !trimmedSecret) {
+    if (!trimmedId || !trimmedSecret || !credentialsLocked) {
       setServiceTypes([]);
       setServiceTypesState('idle');
       serviceTypesKeyRef.current = null;
@@ -131,14 +141,14 @@ export const App = () => {
         });
     }, 600);
     return () => clearTimeout(timer);
-  }, [appId, appSecret, trpcClient]);
+  }, [appId, appSecret, credentialsLocked, trpcClient]);
 
   useEffect(() => {
     const socket = new WebSocket(getWebSocketUrl());
     socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data) as ProgressEvent;
-        if (data.type !== 'scan' && data.type !== 'link') {
+        if (data.type !== 'scan' && data.type !== 'link' && data.type !== 'link-item') {
           return;
         }
         const activeId = activeScanIdRef.current;
@@ -195,7 +205,24 @@ export const App = () => {
     if (!trimmedId || !trimmedSecret) {
       throw new Error('Please provide an application ID and secret.');
     }
+    if (!credentialsLocked) {
+      throw new Error('Please save your API credentials.');
+    }
     return { appId: trimmedId, appSecret: trimmedSecret };
+  };
+
+  const handleSaveCredentials = () => {
+    const trimmedId = appId.trim();
+    const trimmedSecret = appSecret.trim();
+    if (!trimmedId || !trimmedSecret) {
+      setStatus({ state: 'error', message: 'Please provide an application ID and secret.' });
+      return;
+    }
+    setCredentialsLocked(true);
+  };
+
+  const handleEditCredentials = () => {
+    setCredentialsLocked(false);
   };
 
   const handleScan = async () => {
@@ -210,6 +237,7 @@ export const App = () => {
 
       const parsedPageSize = Number.parseInt(pageSize, 10) || 10;
       const parsedThreshold = Number.parseFloat(scoreThreshold) || 0.7;
+      const parsedDelta = Number.parseFloat(scoreDelta);
       const scanId = crypto.randomUUID();
       activeScanIdRef.current = scanId;
       setLinkProgress(null);
@@ -227,6 +255,7 @@ export const App = () => {
         serviceTypeId: trimmedServiceType,
         pageSize: parsedPageSize,
         scoreThreshold: parsedThreshold,
+        scoreDelta: Number.isFinite(parsedDelta) ? parsedDelta : 0.05,
         scanId,
       });
       setMatches(results);
@@ -240,6 +269,15 @@ export const App = () => {
           },
           {}
         )
+      );
+      setSelectedSongByItem(
+        results.reduce<Record<string, string>>((acc, match) => {
+          const topMatch = match.matches[0];
+          if (topMatch) {
+            acc[getMatchKey(match)] = topMatch.song.id;
+          }
+          return acc;
+        }, {})
       );
       if (results.length === 0) {
         setStatus({ state: 'warn', message: 'No matching unlinked songs found.' });
@@ -260,6 +298,7 @@ export const App = () => {
     setScanProgress(null);
     setLinkProgress(null);
     setLinkItemStatus({});
+    setSelectedSongByItem({});
     setStatus({ state: 'warn', message: 'Results cleared. Ready for another scan.' });
   };
 
@@ -321,6 +360,39 @@ export const App = () => {
     });
   };
 
+  const handleSelectMatchSong = (matchId: string, songId: string) => {
+    setSelectedSongByItem((prev) => ({
+      ...prev,
+      [matchId]: songId,
+    }));
+  };
+
+  const handleSelectTopScore = () => {
+    const eligible = matches.filter((match) => {
+      const statusValue = linkItemStatus[getMatchKey(match)];
+      return statusValue !== 'done' && statusValue !== 'in_progress' && statusValue !== 'queued';
+    });
+    if (eligible.length === 0) {
+      return;
+    }
+    const topScore = Math.max(...eligible.map((match) => match.bestScore));
+    const topMatches = eligible.filter((match) => match.bestScore === topScore);
+    const nextIds = new Set(topMatches.map((match) => getMatchKey(match)));
+    setSelectedMatchIds(nextIds);
+    setLinkItemStatus((prev) => {
+      const next = { ...prev };
+      matches.forEach((match) => {
+        const key = getMatchKey(match);
+        const statusValue = next[key];
+        if (statusValue === 'done' || statusValue === 'in_progress' || statusValue === 'queued') {
+          return;
+        }
+        next[key] = nextIds.has(key) ? 'selected' : 'idle';
+      });
+      return next;
+    });
+  };
+
   const handleLinkSelected = async () => {
     if (matches.length === 0) {
       return;
@@ -369,12 +441,19 @@ export const App = () => {
         credentials: getCredentials(),
         serviceTypeId: trimmedServiceType,
         scanId,
-        selections: selected.map((match) => ({
-          planId: match.item.plan.id,
-          itemId: match.item.id,
-          songId: match.song.id,
-          selectionKey: getMatchKey(match),
-        })),
+        selections: selected.map((match) => {
+          const songId =
+            selectedSongByItem[getMatchKey(match)] ?? match.matches[0]?.song.id ?? '';
+          if (!songId) {
+            throw new Error('Please choose a song match before linking.');
+          }
+          return {
+            planId: match.item.plan.id,
+            itemId: match.item.id,
+            songId,
+            selectionKey: getMatchKey(match),
+          };
+        }),
       });
       setStatus({
         state: 'ok',
@@ -400,6 +479,9 @@ export const App = () => {
         appId={appId}
         appSecret={appSecret}
         rememberCredentials={rememberCredentials}
+        isLocked={credentialsLocked}
+        onSave={handleSaveCredentials}
+        onEdit={handleEditCredentials}
         onAppIdChange={setAppId}
         onAppSecretChange={setAppSecret}
         onRememberChange={setRememberCredentials}
@@ -409,15 +491,18 @@ export const App = () => {
         serviceTypeId={serviceTypeId}
         pageSize={pageSize}
         scoreThreshold={scoreThreshold}
+        scoreDelta={scoreDelta}
         isScanning={isScanning}
         serviceTypes={serviceTypes.map((serviceType) => ({
           id: serviceType.id,
           name: serviceType.attributes.name,
         }))}
         serviceTypesState={serviceTypesState}
+        isDisabled={!credentialsLocked}
         onServiceTypeChange={setServiceTypeId}
         onPageSizeChange={setPageSize}
         onScoreThresholdChange={setScoreThreshold}
+        onScoreDeltaChange={setScoreDelta}
         onScan={() => void handleScan()}
         onClear={handleClear}
       />
@@ -428,9 +513,12 @@ export const App = () => {
         progress={isLinking ? linkProgress : scanProgress}
         selectedMatchIds={selectedMatchIds}
         linkItemStatus={linkItemStatus}
+        selectedSongByItem={selectedSongByItem}
         isLinking={isLinking}
         onToggleAll={handleToggleAll}
         onToggleMatch={handleToggleMatch}
+        onSelectMatchSong={handleSelectMatchSong}
+        onSelectTopScore={handleSelectTopScore}
         onLinkSelected={() => void handleLinkSelected()}
       />
 
